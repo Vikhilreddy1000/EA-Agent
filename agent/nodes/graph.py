@@ -40,5 +40,3 @@ graph.add_edge("action_node", "response_node")
 graph.add_edge("response_node", "save_memory")
 graph.add_edge("save_memory", END)
 workflow = graph.compile()
-
-# workflow = graph.compile(checkpointer=checkpointer)

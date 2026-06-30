@@ -1,6 +1,12 @@
 import uvicorn
 from fastapi import FastAPI, Request, UploadFile, File
 import os
+import sys
+import asyncio
+
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 import shutil
 from google import genai
 from dotenv import load_dotenv
@@ -83,10 +89,10 @@ async def transcribe_file(file: UploadFile = File(...)):
         client = genai.Client()
         uploaded_file = client.files.upload(file=temp_path)
         
-        import time
+        import asyncio
         state_str = getattr(uploaded_file.state, "name", str(uploaded_file.state))
         while state_str == "PROCESSING":
-            time.sleep(5)
+            await asyncio.sleep(5)
             uploaded_file = client.files.get(name=uploaded_file.name)
             state_str = getattr(uploaded_file.state, "name", str(uploaded_file.state))
             

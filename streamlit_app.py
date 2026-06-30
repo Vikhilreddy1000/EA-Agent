@@ -1,6 +1,11 @@
 import os
-import uuid
+import sys
+import asyncio
 
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+import uuid
 import requests
 import streamlit as st
 
@@ -47,28 +52,6 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
         
-    st.divider()
-    st.subheader("Upload Meeting File")
-    uploaded_file = st.file_uploader("Upload video/audio/text for MOM", type=["mp4", "mp3", "wav", "txt", "pdf"])
-    if uploaded_file is not None:
-        if st.button("Transcribe & Extract MOM", use_container_width=True):
-            with st.spinner("Transcribing file (this may take a minute)..."):
-                try:
-                    transcribe_url = API_URL.replace("/chat", "/transcribe")
-                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-                    resp = requests.post(transcribe_url, files=files, timeout=None)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    if "transcript" in data:
-                        transcript = data["transcript"]
-                        st.session_state.mom_prompt = f"Extract MOM from these notes:\n\n{transcript}"
-                        st.rerun()
-                    else:
-                        st.error(data.get("error", "Unknown error during transcription"))
-                except Exception as e:
-                    st.error(f"Failed to transcribe: {e}")
-
-
 for item in st.session_state.messages:
     with st.chat_message(item["role"]):
         st.write(item["content"])
@@ -79,41 +62,71 @@ for item in st.session_state.messages:
                 st.json(payload)
 
 
-prompt = st.chat_input("Ask me to schedule, update, cancel a meeting, or extract MOM from notes")
+user_input = st.chat_input("Ask me to schedule a meeting, or attach a meeting file...", accept_file=True, file_type=["mp4", "mp3", "wav", "txt", "pdf"])
 
-if "mom_prompt" in st.session_state:
-    prompt = st.session_state.mom_prompt
-    del st.session_state.mom_prompt
+prompt_text = ""
+uploaded_file = None
 
-if prompt:
-    st.session_state.messages.append({"role": "user", "content": prompt})
+if user_input:
+    if hasattr(user_input, "text"):
+        prompt_text = user_input.text
+    elif isinstance(user_input, str):
+        prompt_text = user_input
 
-    with st.chat_message("user"):
-        st.write(prompt)
+    if hasattr(user_input, "files") and user_input.files:
+        uploaded_file = user_input.files[0]
 
-    with st.chat_message("assistant"):
-        with st.spinner("Working on your calendar..."):
-            try:
-                result = send_message(prompt, st.session_state.session_id)
-                answer = result.get("response_message") or "Done."
-                st.write(answer)
+    if uploaded_file is not None:
+        with st.chat_message("assistant"):
+            with st.spinner("Transcribing attached file (this may take a minute)..."):
+                try:
+                    transcribe_url = API_URL.replace("/chat", "/transcribe")
+                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+                    resp = requests.post(transcribe_url, files=files, timeout=None)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    if "transcript" in data:
+                        transcript = data["transcript"]
+                        if prompt_text:
+                            prompt_text = f"{prompt_text}\n\n[Attached File Transcript]:\n{transcript}"
+                        else:
+                            prompt_text = f"Extract MOM from these notes:\n\n{transcript}"
+                    else:
+                        st.error(data.get("error", "Unknown error during transcription"))
+                        prompt_text = None
+                except Exception as e:
+                    st.error(f"Failed to transcribe: {e}")
+                    prompt_text = None
 
-                with st.expander("Details"):
-                    st.json(result)
+    if prompt_text:
+        st.session_state.messages.append({"role": "user", "content": prompt_text})
 
-                st.session_state.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": answer,
-                        "payload": result,
-                    }
-                )
-            except requests.exceptions.RequestException as exc:
-                error = (
-                    "I couldn't reach the EA Agent API. Make sure FastAPI is "
-                    f"running and the API URL is correct.\n\n{exc}"
-                )
-                st.error(error)
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": error}
-                )
+        with st.chat_message("user"):
+            st.write(prompt_text)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Working on your request..."):
+                try:
+                    result = send_message(prompt_text, st.session_state.session_id)
+                    answer = result.get("response_message") or "Done."
+                    st.write(answer)
+
+                    with st.expander("Details"):
+                        st.json(result)
+
+                    st.session_state.messages.append(
+                        {
+                            "role": "assistant",
+                            "content": answer,
+                            "payload": result,
+                        }
+                    )
+                except requests.exceptions.RequestException as exc:
+                    error = (
+                        "I couldn't reach the EA Agent API. Make sure FastAPI is "
+                        f"running and the API URL is correct.\n\n{exc}"
+                    )
+                    st.error(error)
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": error}
+                    )

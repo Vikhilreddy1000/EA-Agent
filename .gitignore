@@ -1,7 +1,9 @@
 venv
+.venv
 env
 .env
 code_verifier.txt
 oauth_state.txt
 token.pickle
 __pycache__
+temp_uploads
