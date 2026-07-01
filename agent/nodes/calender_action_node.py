@@ -2,6 +2,7 @@ from agent.nodes.calendar_tools import GoogleCalendarService
 from datetime import datetime, timedelta
 from agent.nodes.llm import build_llm
 from langchain_core.messages import SystemMessage, HumanMessage
+from agent.services.mom_service import MOMService
 
 
 service = GoogleCalendarService()
@@ -266,14 +267,30 @@ class CalendarActionNode:
                 
             elif intent == "extract_mom":
                 notes = params.get("meeting_notes", "")
-                llm = build_llm()
-                prompt = [
-                    SystemMessage(content="You are an expert Executive Assistant. Extract the Minutes of Meeting (MOM) from the provided notes. Format your response in Markdown with three sections: \n### Summary\n### Decisions\n### Action Items\n\nYou must extract exactly 5 action items, each with its respective owner and due date."),
-                    HumanMessage(content=f"Here are the meeting notes:\n{notes}")
-                ]
-                mom_response = await llm.ainvoke(prompt)
-                state.mom_result = mom_response.content
-                state.response_message = mom_response.content
+                mom_service = MOMService()
+                try:
+                    mom_response = await mom_service.extract(notes)
+                    state.mom_result = mom_response
+                    
+                    mom_text = f"### {mom_response.get('meeting_title', 'Minutes of Meeting')}\n\n"
+                    mom_text += f"**Summary:**\n{mom_response.get('summary', '')}\n\n"
+                    
+                    decisions = mom_response.get('decisions', [])
+                    if decisions:
+                        mom_text += "**Decisions:**\n"
+                        for d in decisions:
+                            mom_text += f"- {d}\n"
+                        mom_text += "\n"
+                        
+                    tasks = mom_response.get('tasks', [])
+                    if tasks:
+                        mom_text += "**Action Items:**\n"
+                        for t in tasks:
+                            mom_text += f"- {t.get('title', '')} (Owner: {t.get('owner', 'TBD')}, Due: {t.get('due_date', 'TBD')})\n"
+                            
+                    state.response_message = mom_text.strip()
+                except Exception as e:
+                    state.response_message = f"Failed to extract MOM: {str(e)}"
                 print(state.mom_result, "----extract_mom")
                 return state
 
